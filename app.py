@@ -12,7 +12,7 @@ service, no external database.
 
 RUN LOCALLY
 -----------
-    pip install -r requirements.txt
+    pip install -r requirements.txta
     streamlit run app.py
 
 DEPLOY FREE (so your team can access it from a browser link)
@@ -487,63 +487,119 @@ def render_sales_recap():
         st.success("Tidak ada barang dead stock - semua SKU dengan stok pernah terjual dalam 3 bulan terakhir. 🎉")
         return
 
-    brand_options = ["Semua"] + sorted(dead_stock[COLS["brand"]].dropna().unique().tolist()) \
-        if COLS["brand"] in dead_stock.columns else ["Semua"]
-    brand_filter = st.selectbox("Filter Brand", brand_options, key="recap_brand_filter")
+    tab_list, tab_brand = st.tabs(["📋 Daftar Dead Stock", "📦 Analitik per Brand"])
 
-    view = dead_stock
-    if brand_filter != "Semua" and COLS["brand"] in dead_stock.columns:
-        view = view[view[COLS["brand"]] == brand_filter]
+    # --------------------------------------------------------
+    # TAB 1: DAFTAR DEAD STOCK (filter + tabel + download)
+    # --------------------------------------------------------
+    with tab_list:
+        brand_options = ["Semua"] + sorted(dead_stock[COLS["brand"]].dropna().unique().tolist()) \
+            if COLS["brand"] in dead_stock.columns else ["Semua"]
+        brand_filter = st.selectbox("Filter Brand", brand_options, key="recap_brand_filter")
 
-    st.caption(f"Menampilkan {len(view)} SKU - sudah otomatis diurutkan per Brand lalu Nama Barang.")
+        view = dead_stock
+        if brand_filter != "Semua" and COLS["brand"] in dead_stock.columns:
+            view = view[view[COLS["brand"]] == brand_filter]
 
-    display_cols = [c for c in [
-        COLS["product_id"], COLS["nama_barang"], COLS.get("brand"),
-        COLS["stok"], COLS["qty_terjual_3bulan"],
-    ] if c in view.columns]
+        st.caption(f"Menampilkan {len(view)} SKU - sudah otomatis diurutkan per Brand lalu Nama Barang.")
 
-    st.dataframe(view[display_cols], use_container_width=True, height=500)
-
-    # ----------------------------------------------------
-    # EXCEL EXPORT
-    # ----------------------------------------------------
-    def build_recap_excel_bytes(dframe) -> bytes:
-        wb = Workbook()
-        wb.remove(wb.active)
-        header_font = Font(name="Arial", bold=True, color="FFFFFF")
-        header_fill = PatternFill("solid", fgColor="186156")
-
-        ws = wb.create_sheet("Summary", 0)
-        ws["A1"] = "Sales Recap - Dead Stock 3 Bulan - K. Beauty"
-        ws["A1"].font = Font(name="Arial", bold=True, size=14, color="186156")
-        ws["A3"], ws["B3"] = "Total SKU Dead Stock", len(dframe)
-        ws["A4"], ws["B4"] = "Total Qty Stok Menumpuk", int(dframe[COLS["stok"]].sum())
-        for col, width in zip("AB", (32, 20)):
-            ws.column_dimensions[col].width = width
-
-        export_cols = [c for c in [
+        display_cols = [c for c in [
             COLS["product_id"], COLS["nama_barang"], COLS.get("brand"),
             COLS["stok"], COLS["qty_terjual_3bulan"],
-        ] if c in dframe.columns]
-        write_sheet(wb, "Dead Stock", dframe[export_cols], header_font, header_fill)
+        ] if c in view.columns]
 
-        if COLS["brand"] in dframe.columns:
-            for brand, group in dframe.groupby(COLS["brand"]):
-                write_sheet(wb, str(brand), group[export_cols], header_font, header_fill)
+        st.dataframe(view[display_cols], use_container_width=True, height=500)
 
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        return buffer.getvalue()
+        # ------------------------------------------------
+        # EXCEL EXPORT
+        # ------------------------------------------------
+        def build_recap_excel_bytes(dframe) -> bytes:
+            wb = Workbook()
+            wb.remove(wb.active)
+            header_font = Font(name="Arial", bold=True, color="FFFFFF")
+            header_fill = PatternFill("solid", fgColor="186156")
 
-    st.divider()
-    excel_bytes = build_recap_excel_bytes(dead_stock)
-    st.download_button(
-        "⬇️ Download Excel (Dead Stock + per Brand)",
-        data=excel_bytes,
-        file_name="Sales_Recap_Dead_Stock.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="recap_download",
-    )
+            ws = wb.create_sheet("Summary", 0)
+            ws["A1"] = "Sales Recap - Dead Stock 3 Bulan - K. Beauty"
+            ws["A1"].font = Font(name="Arial", bold=True, size=14, color="186156")
+            ws["A3"], ws["B3"] = "Total SKU Dead Stock", len(dframe)
+            ws["A4"], ws["B4"] = "Total Qty Stok Menumpuk", int(dframe[COLS["stok"]].sum())
+            for col, width in zip("AB", (32, 20)):
+                ws.column_dimensions[col].width = width
+
+            export_cols = [c for c in [
+                COLS["product_id"], COLS["nama_barang"], COLS.get("brand"),
+                COLS["stok"], COLS["qty_terjual_3bulan"],
+            ] if c in dframe.columns]
+            write_sheet(wb, "Dead Stock", dframe[export_cols], header_font, header_fill)
+
+            if COLS["brand"] in dframe.columns:
+                for brand, group in dframe.groupby(COLS["brand"]):
+                    write_sheet(wb, str(brand), group[export_cols], header_font, header_fill)
+
+            buffer = io.BytesIO()
+            wb.save(buffer)
+            return buffer.getvalue()
+
+        st.divider()
+        excel_bytes = build_recap_excel_bytes(dead_stock)
+        st.download_button(
+            "⬇️ Download Excel (Dead Stock + per Brand)",
+            data=excel_bytes,
+            file_name="Sales_Recap_Dead_Stock.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="recap_download",
+        )
+
+    # --------------------------------------------------------
+    # TAB 2: ANALITIK PER BRAND (Total SKU vs Total Qty per brand)
+    # --------------------------------------------------------
+    with tab_brand:
+        st.subheader("📦 Dead Stock per Brand")
+
+        if COLS["brand"] not in dead_stock.columns or dead_stock[COLS["brand"]].dropna().empty:
+            st.caption("Kolom Brand/Jenis tidak ditemukan di data yang diupload.")
+        else:
+            brand_agg = dead_stock.groupby(COLS["brand"]).agg(
+                Total_SKU=(COLS["product_id"], "count"),
+                Total_Qty=(COLS["stok"], "sum"),
+            ).reset_index().rename(columns={COLS["brand"]: "Brand"})
+            brand_agg["Rata_rata_Qty_per_SKU"] = (brand_agg["Total_Qty"] / brand_agg["Total_SKU"]).round(1)
+            brand_agg = brand_agg.sort_values("Total_SKU", ascending=False)
+
+            st.caption(
+                "**Total SKU** = berapa jenis barang mati per brand. **Total Qty** = berapa pcs fisik yang "
+                "menumpuk. Brand dengan SKU banyak tapi rata-rata qty/SKU kecil → banyak varian yang perlu "
+                "dirasionalisasi. Brand dengan qty besar di sedikit SKU → cek barang spesifiknya untuk clearance."
+            )
+
+            sort_by = st.radio(
+                "Urutkan berdasarkan", ["Total SKU", "Total Qty"], horizontal=True, key="recap_sort_by"
+            )
+            sort_col = "Total_SKU" if sort_by == "Total SKU" else "Total_Qty"
+            brand_view = brand_agg.sort_values(sort_col, ascending=False)
+
+            top_n = st.slider("Tampilkan berapa brand teratas", 5, min(40, len(brand_view)),
+                               value=min(15, len(brand_view)), key="recap_top_n")
+            brand_view = brand_view.head(top_n)
+
+            chart_cols = st.columns(2)
+            with chart_cols[0]:
+                st.markdown("**Total SKU Dead Stock per Brand**")
+                st.bar_chart(brand_view.set_index("Brand")["Total_SKU"], color=TEAL)
+            with chart_cols[1]:
+                st.markdown("**Total Qty Menumpuk per Brand**")
+                st.bar_chart(brand_view.set_index("Brand")["Total_Qty"], color=LIME)
+
+            st.markdown("**Tabel lengkap per Brand**")
+            st.dataframe(
+                brand_agg.rename(columns={
+                    "Total_SKU": "Total SKU Dead Stock",
+                    "Total_Qty": "Total Qty Stok Menumpuk",
+                    "Rata_rata_Qty_per_SKU": "Rata-rata Qty per SKU",
+                }),
+                use_container_width=True, height=400,
+            )
 
 
 # ============================================================
