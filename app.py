@@ -51,7 +51,7 @@ MENU_PO = "📊 PO Recommendation"
 MENU_RECAP = "📋 Sales Recap"
 
 st.set_page_config(
-    page_title="K. Beauty - Dashboard",
+    page_title="Dashboard",
     page_icon=LOGO_PATH,
     layout="wide",
 )
