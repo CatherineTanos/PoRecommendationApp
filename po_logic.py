@@ -1,13 +1,4 @@
 """
-po_logic.py
-===========
-Core data logic for the PO recommendation engine.
-
-Reads the 2 raw exports straight from iPOS 5.0 ("Daftar Penjualan per Item
-per Jenis" and "Daftar Item" / stock list) - the messy report layout with
-merged cells, spacer rows, and "Jenis :" / "Total :" section rows - no manual
-cleanup needed before uploading.
-
 RULES (per your latest instructions)
 -------------------------------------
 1. No fixed SLOW_MOVING_THRESHOLD number. A SKU is flagged slow moving
@@ -39,7 +30,9 @@ COLS = {
     "harga": "Harga",       # cost price ("Harga Pokok") from the stok file
     "qty_terjual_30h": "Qty Terjual 30 Hari",
     "qty_terjual_3bulan": "Qty Terjual 3 Bulan",
+    "qty_beli": "Qty Pembelian",   # from the "Daftar Pembelian" iPOS export
     "stok": "Stok",
+    "sales_staff": "Sales Staff",
 }
 
 FLAG_COLORS = {
@@ -252,6 +245,28 @@ def load_penjualan_3bulan(file) -> pd.DataFrame:
                                   qty_aliases=["qty terjual 3 bulan", "jumlah", "qty terjual", "qty"])
 
 
+def load_pembelian(file) -> pd.DataFrame:
+    """Returns columns: Product ID, Nama Barang, Brand (opt), Qty Pembelian.
+    Reads the 'Daftar Pembelian per Item per Jenis' iPOS export - same
+    report layout as the sales/stock exports. This report is a total over
+    whatever date range you picked when exporting (e.g. 'last 1 month'),
+    not a per-transaction log with individual dates - so a SKU showing up
+    here at all means it was restocked at some point within that exported
+    window, which is exactly the signal Deadstock uses to tell a genuinely
+    dead item apart from a brand-new one that just hasn't sold yet."""
+    raw = _read_raw(file)
+    if _looks_like_raw_ipos(raw):
+        df = _parse_ipos_report(raw, qty_label="jumlah")
+        df = df.rename(columns={"Jumlah": COLS["qty_beli"]})
+        return df
+    if hasattr(file, "seek"):
+        file.seek(0)
+    name = getattr(file, "name", str(file)).lower()
+    df = pd.read_excel(file) if name.endswith((".xlsx", ".xls")) else pd.read_csv(file)
+    return _coerce_clean_columns(df, qty_col_std=COLS["qty_beli"],
+                                  qty_aliases=["qty pembelian", "jumlah", "qty beli", "qty"])
+
+
 def _coerce_clean_columns(df: pd.DataFrame, qty_col_std, qty_aliases):
     """Best-effort header matching for already-tabular files (not the raw
     iPOS report), so simple CSV/XLSX exports still work."""
@@ -302,6 +317,10 @@ def dedupe_penjualan(df: pd.DataFrame):
 
 def dedupe_penjualan_3bulan(df: pd.DataFrame):
     return _dedupe(df, sum_col=COLS["qty_terjual_3bulan"])
+
+
+def dedupe_pembelian(df: pd.DataFrame):
+    return _dedupe(df, sum_col=COLS["qty_beli"])
 
 
 def dedupe_stok(df: pd.DataFrame):
@@ -396,22 +415,94 @@ def compute_recommendations(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================
-# SALES RECAP - DEAD STOCK OVER 3 MONTHS
+# SALES STAFF <-> BRAND MAPPING
+# ============================================================
+# Built from the sales-staff/brand assignment list you shared. A few brand
+# names there are spelled out in full (e.g. "Indo", "Laneige", "Madagascar")
+# while the actual "Jenis" code in your iPOS exports is a short abbreviation
+# (e.g. "IND", "LAN", "MADA"). Where the short code wasn't an obvious 1:1
+# match, this is my best-guess correlation based on the codes actually seen
+# in your exports so far - PLEASE double check the ones marked (guess) and
+# tell me if any need correcting:
+#   DGM  = Daeng (Gi Meo Ri)   (guess)   HL   = Hadalabo (Hada Labo) (guess)
+#   HB   = Hellobubble          (guess)   GNG  = Grace and Glow       (guess)
+#   SW   = Sulwhasoo             (guess)   PF   = Pinkflash            (guess)
+#   BIO  = Bioaqua                (guess)   FOCA = Focallure             (guess)
+#   SOME = Some by mi              (guess)
+#
+# Codes seen in your data that aren't in the list at all yet (BMS, DIANE,
+# GIFT, SHRD) fall into "Belum Terpetakan" below until you tell me who owns
+# them. The "Tbs.." side of your list (Ocha/Vina/Chey/Putry/Megen) is kept
+# here too in case that store's data ever gets processed by this app, but
+# none of those brand names have shown up in your K.Beauty exports so far.
+STAFF_BRAND_MAP = {
+    "Sasi": ["BEAUDELAB", "BLACKMORES", "DGM", "FLAIRE", "IMPLORA", "IND", "LCC", "MADA", "PUREUM"],
+    "Frezia": ["AB", "FLIMTY", "HL", "JUDY", "KR", "LAN", "MU", "PF", "SENKA"],
+    "Chelsy": ["ASIA", "BIO", "BNP", "BREYLEE", "FAV", "FOCA", "GNG", "LABORE", "MLEN", "SC", "SOME", "SW", "TO", "WEST"],
+    "Tidak Bertuan": ["AMH", "CBD", "COSRX", "HB", "SKII", "THAI", "X2"],
+    # Tbs-side staff - not currently relevant to K.Beauty POS data, kept for
+    # completeness. None of these conflict with the K.Beauty codes above.
+    "Ocha": ["AERIS", "AVOSKIN", "AZARINE", "CRAYOLAN", "DIOR", "ESTEE", "KK", "LACOCO", "LA GIRL",
+             "L'OREAL", "MAYBELLINE", "ORIGINOTE", "SCARLETT"],
+    "Vina": ["AP", "BB", "BELLE", "CHANEL", "HA", "HERBORIS", "LUMECOLORS", "LT PRO", "MATRIX",
+             "MAKARIZO", "MAKE OVER"],
+    "Chey": ["BNB", "DAZZLE", "LAVOJOY", "YOU"],
+    "Putry": ["BENEFIT", "HARA", "INAURA", "LUXCRIME", "MAC", "NVMEE", "SA", "TH", "TKD", "TLM", "YSL"],
+    "Megen": ["SOMETHINC"],
+}
+
+UNMAPPED_STAFF_LABEL = "Belum Terpetakan"
+
+
+def _build_brand_to_staff():
+    mapping = {}
+    for staff, brands in STAFF_BRAND_MAP.items():
+        for b in brands:
+            key = _norm_header(b)
+            if key and key not in mapping:  # first occurrence wins
+                mapping[key] = staff
+    return mapping
+
+
+BRAND_TO_STAFF = _build_brand_to_staff()
+
+
+def get_staff_for_brand(brand) -> str:
+    if brand is None or (isinstance(brand, float) and pd.isna(brand)):
+        return UNMAPPED_STAFF_LABEL
+    return BRAND_TO_STAFF.get(_norm_header(str(brand)), UNMAPPED_STAFF_LABEL)
+
+
+def add_sales_staff_column(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df[COLS["sales_staff"]] = df[COLS["brand"]].map(get_staff_for_brand) if COLS["brand"] in df.columns else UNMAPPED_STAFF_LABEL
+    return df
+
+
+# ============================================================
+# DEADSTOCK - ITEMS WITH ZERO SALES OVER 3 MONTHS
 # ============================================================
 
-def build_sales_recap(penjualan_3bulan_df: pd.DataFrame, stok_df: pd.DataFrame):
+def build_deadstock(penjualan_3bulan_df: pd.DataFrame, stok_df: pd.DataFrame, pembelian_df: pd.DataFrame = None):
     """
     "Barang tidak laku dalam 3 bulan" finder: every SKU that currently has
     Stok > 0 but sold ZERO units over the last 3 months - including SKUs
     that don't appear at all in the 3-month sales export (treated as 0,
     same convention used everywhere else in this app).
 
+    If `pembelian_df` (Daftar Pembelian) is provided, any SKU that shows up
+    there is treated as recently restocked and EXCLUDED even if it sold
+    zero units - a brand-new arrival hasn't had a fair chance to sell yet,
+    so it shouldn't be flagged as dead. Pass None to skip this check (the
+    Data Pembelian upload is optional).
+
     Starts from the stock list (not an outer join) since we only ever care
     about SKUs that physically still have stock sitting on the shelf/gudang.
 
-    Returns (dead_stock_df, dup_report). dead_stock_df is already sorted by
-    Brand then Nama Barang so it reads top-to-bottom correctly on a phone
-    without anyone needing to tap a column header to sort it themselves.
+    Returns (dead_stock_df, dup_report). dead_stock_df has a "Sales Staff"
+    column (via the Brand -> staff mapping) and is sorted by Sales Staff,
+    then Brand, then Nama Barang, so it reads top-to-bottom correctly on a
+    phone without anyone needing to tap a column header to sort it.
     """
     penjualan_clean, dup_penjualan = dedupe_penjualan_3bulan(penjualan_3bulan_df)
     stok_clean, dup_stok = dedupe_stok(stok_df)
@@ -423,14 +514,72 @@ def build_sales_recap(penjualan_3bulan_df: pd.DataFrame, stok_df: pd.DataFrame):
     )
     df[qty_col] = df[qty_col].fillna(0)
 
-    dead_stock = df[(df[qty_col] == 0) & (df[COLS["stok"]] > 0)].copy()
+    dup_pembelian = 0
+    excluded_new_arrivals = 0
+    if pembelian_df is not None and not pembelian_df.empty:
+        pembelian_clean, dup_pembelian = dedupe_pembelian(pembelian_df)
+        recently_restocked_ids = set(pembelian_clean[COLS["product_id"]])
+        zero_sales_mask = (df[qty_col] == 0) & (df[COLS["stok"]] > 0)
+        excluded_new_arrivals = int((zero_sales_mask & df[COLS["product_id"]].isin(recently_restocked_ids)).sum())
+        dead_stock = df[zero_sales_mask & ~df[COLS["product_id"]].isin(recently_restocked_ids)].copy()
+    else:
+        dead_stock = df[(df[qty_col] == 0) & (df[COLS["stok"]] > 0)].copy()
 
-    sort_cols = [c for c in [COLS["brand"], COLS["nama_barang"]] if c in dead_stock.columns]
+    dead_stock = add_sales_staff_column(dead_stock)
+
+    sort_cols = [c for c in [COLS["sales_staff"], COLS["brand"], COLS["nama_barang"]] if c in dead_stock.columns]
     if sort_cols:
         dead_stock = dead_stock.sort_values(sort_cols, na_position="last").reset_index(drop=True)
 
     dup_report = {
         "penjualan_3bulan_duplicates_merged": dup_penjualan,
         "stok_duplicates_merged": dup_stok,
+        "pembelian_duplicates_merged": dup_pembelian,
+        "excluded_new_arrivals": excluded_new_arrivals,
     }
     return dead_stock, dup_report
+
+
+# ============================================================
+# OVERSTOCK - STOCK EXCEEDS 3-MONTH DEMAND
+# ============================================================
+
+def build_overstock(penjualan_3bulan_df: pd.DataFrame, stok_df: pd.DataFrame):
+    """
+    Overstock finder: every SKU where Stok > Qty Terjual 3 Bulan - i.e.
+    there's more sitting on the shelf than has moved in the last 3 months,
+    whether it sold a little or nothing at all. Broader than Deadstock
+    (which only catches zero-sales items) - this also catches slow movers
+    that DID sell something but are still way overstocked relative to
+    demand, so a brand-new arrival with a big first stock intake and no
+    sales yet legitimately shows up here (this menu doesn't apply the
+    Deadstock "recently restocked" exclusion, since flagging a big new
+    intake as needing review is exactly the point of Overstock).
+
+    Returns (overstock_df, dup_report). overstock_df has a "Sales Staff"
+    column and is sorted by Sales Staff, then Brand, then Nama Barang.
+    """
+    penjualan_clean, dup_penjualan = dedupe_penjualan_3bulan(penjualan_3bulan_df)
+    stok_clean, dup_stok = dedupe_stok(stok_df)
+
+    qty_col = COLS["qty_terjual_3bulan"]
+    df = stok_clean.merge(
+        penjualan_clean[[COLS["product_id"], qty_col]],
+        on=COLS["product_id"], how="left",
+    )
+    df[qty_col] = df[qty_col].fillna(0)
+
+    overstock = df[df[COLS["stok"]] > df[qty_col]].copy()
+    overstock["Selisih Stok-Penjualan"] = overstock[COLS["stok"]] - overstock[qty_col]
+
+    overstock = add_sales_staff_column(overstock)
+
+    sort_cols = [c for c in [COLS["sales_staff"], COLS["brand"], COLS["nama_barang"]] if c in overstock.columns]
+    if sort_cols:
+        overstock = overstock.sort_values(sort_cols, na_position="last").reset_index(drop=True)
+
+    dup_report = {
+        "penjualan_3bulan_duplicates_merged": dup_penjualan,
+        "stok_duplicates_merged": dup_stok,
+    }
+    return overstock, dup_report
