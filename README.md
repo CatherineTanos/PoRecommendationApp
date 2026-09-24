@@ -1,18 +1,22 @@
-# PO Recommendation & Sales Recap Dashboard
+# PO Recommendation, Deadstock & Overstock Dashboard
 
-Streamlit app dengan 3 menu untuk K. Beauty / The Beauty Shop:
+Streamlit app dengan 4 menu untuk K. Beauty / The Beauty Shop:
 
 1. **🏠 Welcome** - overview cepat (total SKU, total qty stok, total brand)
    begitu Data Stok diupload.
 2. **📊 PO Recommendation** - draft PO mingguan dari **Data Stok** +
    **Data Penjualan 30 Hari**.
-3. **📋 Sales Recap** - cari barang yang tidak laku dalam **3 bulan**
-   terakhir (dead stock / kandidat produk fokus) dari **Data Stok** +
-   **Data Penjualan 3 Bulan**.
+3. **🧟 Deadstock** - cari barang yang tidak laku dalam **3 bulan**
+   terakhir dari **Data Stok** + **Data Penjualan 3 Bulan**. Produk baru
+   yang baru direstock (dicek lewat **Data Pembelian**, opsional) tidak
+   ikut ke-flag - wajar kalau belum sempat laku.
+4. **📈 Overstock** - barang dengan stok LEBIH BANYAK dari penjualan 3
+   bulan (lebih luas dari Deadstock, termasuk yang sempat laku sedikit
+   tapi masih kelebihan stok jauh).
 
 Upload file aslinya apa adanya dari export iPOS 5.0, tidak perlu dirapikan
-dulu. Data Stok dipakai bersama di menu 2 & 3 - upload sekali saja di
-sidebar.
+dulu. Data Stok dipakai bersama di menu 2, 3 & 4 - upload sekali saja di
+sidebar. Data Penjualan 3 Bulan dipakai bersama di menu 3 & 4.
 
 ## Rumus & Rules
 
@@ -26,12 +30,30 @@ sidebar.
    kecepatan jual), SKU ditandai 🔴 **URGENT**. Sisanya yang perlu PO tapi
    tidak mendesak → 🟢 **NORMAL**.
 
-### Sales Recap (menu 3)
-Barang dianggap **dead stock** kalau: `Qty Terjual 3 Bulan == 0` (termasuk
+### Deadstock (menu 3)
+Barang dianggap **deadstock** kalau: `Qty Terjual 3 Bulan == 0` (termasuk
 SKU yang sama sekali tidak muncul di data penjualan 3 bulan - dianggap 0)
-**DAN** `Stok > 0` saat ini. Hasilnya otomatis diurutkan per **Brand**,
-lalu **Nama Barang** - supaya gampang di-scan dari HP tanpa perlu klik
-sort kolom manual. Ada filter Brand juga buat fokus ke 1 brand tertentu.
+**DAN** `Stok > 0` saat ini **DAN** SKU-nya tidak muncul di Data Pembelian
+(kalau diupload) - karena kalau baru direstock, wajar belum sempat laku,
+jadi bukan "mati" beneran.
+
+### Overstock (menu 4)
+Barang dianggap **overstock** kalau `Stok > Qty Terjual 3 Bulan`. Ini
+mencakup semua kasus Deadstock (stok>0, terjual=0 otomatis stok>terjual)
+plus kasus tambahan: barang yang sempat laku tapi cuma sedikit dibanding
+stok yang ada. Beda dengan Deadstock, Overstock tidak exclude produk baru
+- karena barang baru dengan stok masuk besar tapi belum laku tetap relevan
+untuk dipantau di sini.
+
+### Sales Staff (menu 3 & 4)
+Hasil Deadstock dan Overstock dikelompokkan per **Sales Staff** berdasarkan
+brand yang mereka pegang (lihat `STAFF_BRAND_MAP` di `po_logic.py`). Excel
+export-nya jadi 1 sheet per staff (bukan per brand lagi), plus ada filter
+Sales Staff & Brand di tampilan web-nya. Brand yang belum ada pemiliknya di
+mapping otomatis masuk sheet **"Belum Terpetakan"**.
+
+Kalau ada brand baru atau staff pindah brand, edit langsung dict
+`STAFF_BRAND_MAP` di bagian atas `po_logic.py` - tidak perlu ubah logic lain.
 
 ## Menjalankan lokal
 
@@ -73,10 +95,10 @@ file yang sama - tidak perlu ubah kode.
 
 ## File di folder ini
 
-- `app.py` - UI Streamlit: 3 menu (Welcome, PO Recommendation, Sales Recap).
+- `app.py` - UI Streamlit: 4 menu (Welcome, PO Recommendation, Deadstock, Overstock).
 - `po_logic.py` - semua logic: parsing file, dedup, join, klasifikasi PO,
-  dan dead-stock finder untuk Sales Recap. Dipisah dari `app.py` supaya
-  bisa dites sendiri tanpa buka browser.
+  deadstock/overstock finder, dan mapping brand ke sales staff. Dipisah
+  dari `app.py` supaya bisa dites sendiri tanpa buka browser.
 - `assets/logo.jpg` - logo K. Beauty / The Beauty Shop yang tampil di header & sidebar.
 - `.streamlit/config.toml` - theme warna (teal & lime) yang otomatis dipakai Streamlit.
 - `requirements.txt` - dependency untuk `pip install`.
