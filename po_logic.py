@@ -451,7 +451,7 @@ STAFF_BRAND_MAP = {
     "Megen": ["SOMETHINC"],
 }
 
-UNMAPPED_STAFF_LABEL = "Belum Terpetakan"
+UNMAPPED_STAFF_LABEL = "Tidak Bertuan"
 
 
 def _build_brand_to_staff():
