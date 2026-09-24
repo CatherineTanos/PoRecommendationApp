@@ -12,7 +12,7 @@ service, no external database.
 
 RUN LOCALLY
 -----------
-    pip install -r requirements.txta
+    pip install -r requirements.txt
     streamlit run app.py
 
 DEPLOY FREE (so your team can access it from a browser link)
@@ -35,10 +35,12 @@ from po_logic import (
     FLAG_COLORS,
     load_penjualan,
     load_penjualan_3bulan,
+    load_pembelian,
     load_stok,
     dedupe_stok,
     build_dataset,
-    build_sales_recap,
+    build_deadstock,
+    build_overstock,
     compute_recommendations,
 )
 
@@ -48,10 +50,11 @@ LIME = "#ADF901"
 
 MENU_WELCOME = "🏠 Welcome"
 MENU_PO = "📊 PO Recommendation"
-MENU_RECAP = "📋 Sales Recap"
+MENU_DEADSTOCK = "🧟 Deadstock"
+MENU_OVERSTOCK = "📈 Overstock"
 
 st.set_page_config(
-    page_title="Dashboard",
+    page_title="K. Beauty - Dashboard",
     page_icon=LOGO_PATH,
     layout="wide",
 )
@@ -101,7 +104,7 @@ st.sidebar.image(LOGO_PATH, use_container_width=True)
 st.sidebar.title("📦 K. Beauty Dashboard")
 
 menu = st.sidebar.radio(
-    "Menu", [MENU_WELCOME, MENU_PO, MENU_RECAP], label_visibility="collapsed"
+    "Menu", [MENU_WELCOME, MENU_PO, MENU_DEADSTOCK, MENU_OVERSTOCK], label_visibility="collapsed"
 )
 
 st.sidebar.divider()
@@ -116,8 +119,12 @@ penjualan_30h_file = st.sidebar.file_uploader(
     type=["csv", "xlsx", "xls"], key="p30_file",
 )
 penjualan_3bulan_file = st.sidebar.file_uploader(
-    "Data Penjualan 3 Bulan (untuk Sales Recap)",
+    "Data Penjualan 3 Bulan (untuk Deadstock & Overstock)",
     type=["csv", "xlsx", "xls"], key="p3b_file",
+)
+pembelian_file = st.sidebar.file_uploader(
+    "Data Pembelian (opsional, untuk exclude produk baru dari Deadstock)",
+    type=["csv", "xlsx", "xls"], key="pembelian_file",
 )
 
 st.sidebar.caption(
@@ -148,6 +155,13 @@ if penjualan_3bulan_file:
         penjualan_3bulan_df = load_penjualan_3bulan(penjualan_3bulan_file)
     except Exception as e:
         p3b_error = str(e)
+
+pembelian_df, pembelian_error = None, None
+if pembelian_file:
+    try:
+        pembelian_df = load_pembelian(pembelian_file)
+    except Exception as e:
+        pembelian_error = str(e)
 
 
 # ============================================================
@@ -203,11 +217,12 @@ def render_welcome():
 2. Untuk rekomendasi PO mingguan: tambahkan **Data Penjualan 30 Hari**, lalu
    buka menu **📊 PO Recommendation**.
 3. Untuk cari barang yang tidak laku / produk fokus: tambahkan **Data
-   Penjualan 3 Bulan**, lalu buka menu **📋 Sales Recap**.
+   Penjualan 3 Bulan** (dan opsional **Data Pembelian** biar produk baru
+   tidak ikut ke-flag), lalu buka menu **🧟 Deadstock** atau **📈 Overstock**.
 
 Semua file diupload apa adanya dari export iPOS 5.0 (*Daftar Item* untuk
-stok, *Daftar Penjualan per Item per Jenis* untuk penjualan) - tidak perlu
-dirapikan dulu.
+stok, *Daftar Penjualan per Item per Jenis* untuk penjualan, *Daftar
+Pembelian per Item per Jenis* untuk pembelian) - tidak perlu dirapikan dulu.
             """
         )
         return
@@ -240,7 +255,8 @@ dirapikan dulu.
     st.markdown(
         f"""
 - {ready_po} **PO Recommendation** - {"siap dibuka" if penjualan_30h_df is not None else "upload Data Penjualan 30 Hari dulu"}
-- {ready_recap} **Sales Recap** - {"siap dibuka" if penjualan_3bulan_df is not None else "upload Data Penjualan 3 Bulan dulu"}
+- {ready_recap} **Deadstock** - {"siap dibuka" if penjualan_3bulan_df is not None else "upload Data Penjualan 3 Bulan dulu"} {"(+ Data Pembelian opsional sudah terpasang)" if penjualan_3bulan_df is not None and pembelian_df is not None else ""}
+- {ready_recap} **Overstock** - {"siap dibuka" if penjualan_3bulan_df is not None else "upload Data Penjualan 3 Bulan dulu"}
         """
     )
 
@@ -437,14 +453,202 @@ def render_po_recommendation():
 
 
 # ============================================================
-# MENU 3: SALES RECAP (dead stock 3 bulan)
+# MENU 3: DEADSTOCK (zero sales in 3 months, excluding new arrivals)
 # ============================================================
 
-def render_sales_recap():
-    st.header("📋 Sales Recap - Dead Stock 3 Bulan")
+def render_deadstock():
+    st.header("🧟 Deadstock")
     st.caption(
         "Barang dengan stok masih ada TAPI tidak ada penjualan sama sekali "
-        "dalam 3 bulan terakhir - kandidat produk fokus / clearance."
+        "dalam 3 bulan terakhir - kandidat produk fokus / clearance. Produk "
+        "baru yang baru direstock (dilihat dari Data Pembelian) tidak ikut "
+        "dihitung, karena wajar belum sempat laku."
+    )
+
+    if stok_error:
+        st.error(f"Gagal membaca Data Stok: {stok_error}")
+        return
+    if p3b_error:
+        st.error(f"Gagal membaca Data Penjualan 3 Bulan: {p3b_error}")
+        return
+    if pembelian_error:
+        st.error(f"Gagal membaca Data Pembelian: {pembelian_error}")
+        return
+    if stok_df is None or penjualan_3bulan_df is None:
+        st.info("Upload **Data Stok** dan **Data Penjualan 3 Bulan** di sidebar untuk buka menu ini.")
+        return
+
+    missing = []
+    if COLS["product_id"] not in penjualan_3bulan_df.columns:
+        missing.append("Kolom Kode Item / Product ID tidak ditemukan di file penjualan 3 bulan")
+    if COLS["qty_terjual_3bulan"] not in penjualan_3bulan_df.columns:
+        missing.append("Kolom Jumlah / Qty Terjual tidak ditemukan di file penjualan 3 bulan")
+    if COLS["product_id"] not in stok_df.columns:
+        missing.append("Kolom Kode Item / Product ID tidak ditemukan di Data Stok")
+    if COLS["stok"] not in stok_df.columns:
+        missing.append("Kolom Stok tidak ditemukan di Data Stok")
+    if missing:
+        st.error("Kolom tidak ditemukan:\n\n" + "\n".join(f"- {m}" for m in missing))
+        return
+
+    if pembelian_df is None:
+        st.info(
+            "ℹ️ Data Pembelian belum diupload - Deadstock dihitung tanpa exclude produk baru. "
+            "Upload di sidebar (opsional) kalau mau produk yang baru direstock tidak ikut ke-flag."
+        )
+
+    dead_stock, dup_report = build_deadstock(penjualan_3bulan_df, stok_df, pembelian_df=pembelian_df)
+
+    total_dupes = dup_report["penjualan_3bulan_duplicates_merged"] + dup_report["stok_duplicates_merged"] + dup_report["pembelian_duplicates_merged"]
+    if total_dupes > 0:
+        st.warning(
+            f"🧹 Ditemukan & digabung {dup_report['penjualan_3bulan_duplicates_merged']} baris duplikat "
+            f"di data penjualan 3 bulan, {dup_report['stok_duplicates_merged']} di data stok, dan "
+            f"{dup_report['pembelian_duplicates_merged']} di data pembelian."
+        )
+    if dup_report["excluded_new_arrivals"] > 0:
+        st.success(
+            f"✅ {dup_report['excluded_new_arrivals']} SKU dikecualikan dari Deadstock karena baru "
+            f"direstock (ada di Data Pembelian) - dianggap belum sempat laku, bukan barang mati."
+        )
+
+    col1, col2 = st.columns(2)
+    col1.metric("Total SKU Deadstock", f"{len(dead_stock):,}")
+    col2.metric("Total Qty Stok Menumpuk", f"{int(dead_stock[COLS['stok']].sum()):,}" if len(dead_stock) else "0")
+
+    if dead_stock.empty:
+        st.success("Tidak ada barang deadstock - semua SKU dengan stok pernah terjual dalam 3 bulan terakhir. 🎉")
+        return
+
+    tab_list, tab_brand = st.tabs(["📋 Daftar Deadstock", "📦 Analitik per Brand"])
+
+    # --------------------------------------------------------
+    # TAB 1: DAFTAR DEADSTOCK (filter + tabel + download)
+    # --------------------------------------------------------
+    with tab_list:
+        filter_cols = st.columns(2)
+        staff_options = ["Semua"] + sorted(dead_stock[COLS["sales_staff"]].dropna().unique().tolist())
+        staff_filter = filter_cols[0].selectbox("Filter Sales Staff", staff_options, key="dead_staff_filter")
+        brand_options = ["Semua"] + sorted(dead_stock[COLS["brand"]].dropna().unique().tolist()) \
+            if COLS["brand"] in dead_stock.columns else ["Semua"]
+        brand_filter = filter_cols[1].selectbox("Filter Brand", brand_options, key="dead_brand_filter")
+
+        view = dead_stock
+        if staff_filter != "Semua":
+            view = view[view[COLS["sales_staff"]] == staff_filter]
+        if brand_filter != "Semua" and COLS["brand"] in dead_stock.columns:
+            view = view[view[COLS["brand"]] == brand_filter]
+
+        st.caption(f"Menampilkan {len(view)} SKU - sudah otomatis diurutkan per Sales Staff, Brand, lalu Nama Barang.")
+
+        display_cols = [c for c in [
+            COLS["product_id"], COLS["nama_barang"], COLS.get("brand"), COLS["sales_staff"],
+            COLS["stok"], COLS["qty_terjual_3bulan"],
+        ] if c in view.columns]
+
+        st.dataframe(view[display_cols], use_container_width=True, height=500)
+
+        # ------------------------------------------------
+        # EXCEL EXPORT - 1 sheet per Sales Staff
+        # ------------------------------------------------
+        def build_deadstock_excel_bytes(dframe) -> bytes:
+            wb = Workbook()
+            wb.remove(wb.active)
+            header_font = Font(name="Arial", bold=True, color="FFFFFF")
+            header_fill = PatternFill("solid", fgColor="186156")
+
+            ws = wb.create_sheet("Summary", 0)
+            ws["A1"] = "Deadstock - K. Beauty"
+            ws["A1"].font = Font(name="Arial", bold=True, size=14, color="186156")
+            ws["A3"], ws["B3"] = "Total SKU Deadstock", len(dframe)
+            ws["A4"], ws["B4"] = "Total Qty Stok Menumpuk", int(dframe[COLS["stok"]].sum())
+            for col, width in zip("AB", (32, 20)):
+                ws.column_dimensions[col].width = width
+
+            export_cols = [c for c in [
+                COLS["product_id"], COLS["nama_barang"], COLS.get("brand"),
+                COLS["stok"], COLS["qty_terjual_3bulan"],
+            ] if c in dframe.columns]
+            write_sheet(wb, "Semua Deadstock", dframe[export_cols], header_font, header_fill)
+
+            for staff, group in dframe.groupby(COLS["sales_staff"]):
+                write_sheet(wb, str(staff), group[export_cols], header_font, header_fill)
+
+            buffer = io.BytesIO()
+            wb.save(buffer)
+            return buffer.getvalue()
+
+        st.divider()
+        excel_bytes = build_deadstock_excel_bytes(dead_stock)
+        st.download_button(
+            "⬇️ Download Excel (Semua Deadstock + per Sales Staff)",
+            data=excel_bytes,
+            file_name="Deadstock.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dead_download",
+        )
+
+    # --------------------------------------------------------
+    # TAB 2: ANALITIK PER BRAND (Total SKU vs Total Qty per brand)
+    # --------------------------------------------------------
+    with tab_brand:
+        st.subheader("📦 Deadstock per Brand")
+
+        if COLS["brand"] not in dead_stock.columns or dead_stock[COLS["brand"]].dropna().empty:
+            st.caption("Kolom Brand/Jenis tidak ditemukan di data yang diupload.")
+        else:
+            brand_agg = dead_stock.groupby(COLS["brand"]).agg(
+                Total_SKU=(COLS["product_id"], "count"),
+                Total_Qty=(COLS["stok"], "sum"),
+            ).reset_index().rename(columns={COLS["brand"]: "Brand"})
+            brand_agg["Rata_rata_Qty_per_SKU"] = (brand_agg["Total_Qty"] / brand_agg["Total_SKU"]).round(1)
+            brand_agg = brand_agg.sort_values("Total_SKU", ascending=False)
+
+            st.caption(
+                "**Total SKU** = berapa jenis barang mati per brand. **Total Qty** = berapa pcs fisik yang "
+                "menumpuk. Brand dengan SKU banyak tapi rata-rata qty/SKU kecil → banyak varian yang perlu "
+                "dirasionalisasi. Brand dengan qty besar di sedikit SKU → cek barang spesifiknya untuk clearance."
+            )
+
+            sort_by = st.radio(
+                "Urutkan berdasarkan", ["Total SKU", "Total Qty"], horizontal=True, key="dead_sort_by"
+            )
+            sort_col = "Total_SKU" if sort_by == "Total SKU" else "Total_Qty"
+            brand_view = brand_agg.sort_values(sort_col, ascending=False)
+
+            top_n = st.slider("Tampilkan berapa brand teratas", 5, min(40, len(brand_view)),
+                               value=min(15, len(brand_view)), key="dead_top_n")
+            brand_view = brand_view.head(top_n)
+
+            chart_cols = st.columns(2)
+            with chart_cols[0]:
+                st.markdown("**Total SKU Deadstock per Brand**")
+                st.bar_chart(brand_view.set_index("Brand")["Total_SKU"], color=TEAL)
+            with chart_cols[1]:
+                st.markdown("**Total Qty Menumpuk per Brand**")
+                st.bar_chart(brand_view.set_index("Brand")["Total_Qty"], color=LIME)
+
+            st.markdown("**Tabel lengkap per Brand**")
+            st.dataframe(
+                brand_agg.rename(columns={
+                    "Total_SKU": "Total SKU Deadstock",
+                    "Total_Qty": "Total Qty Stok Menumpuk",
+                    "Rata_rata_Qty_per_SKU": "Rata-rata Qty per SKU",
+                }),
+                use_container_width=True, height=400,
+            )
+
+
+# ============================================================
+# MENU 4: OVERSTOCK (stock > 3-month sales)
+# ============================================================
+
+def render_overstock():
+    st.header("📈 Overstock")
+    st.caption(
+        "Barang dengan stok LEBIH BANYAK dari penjualan 3 bulan terakhir - "
+        "termasuk yang sempat laku sedikit tapi masih kelebihan stok jauh. "
+        "Lebih luas dari Deadstock (yang cuma tangkap barang 0 penjualan)."
     )
 
     if stok_error:
@@ -470,7 +674,7 @@ def render_sales_recap():
         st.error("Kolom tidak ditemukan:\n\n" + "\n".join(f"- {m}" for m in missing))
         return
 
-    dead_stock, dup_report = build_sales_recap(penjualan_3bulan_df, stok_df)
+    overstock, dup_report = build_overstock(penjualan_3bulan_df, stok_df)
 
     total_dupes = dup_report["penjualan_3bulan_duplicates_merged"] + dup_report["stok_duplicates_merged"]
     if total_dupes > 0:
@@ -480,123 +684,117 @@ def render_sales_recap():
         )
 
     col1, col2 = st.columns(2)
-    col1.metric("Total SKU Dead Stock", f"{len(dead_stock):,}")
-    col2.metric("Total Qty Stok Menumpuk", f"{int(dead_stock[COLS['stok']].sum()):,}" if len(dead_stock) else "0")
+    col1.metric("Total SKU Overstock", f"{len(overstock):,}")
+    col2.metric("Total Selisih Stok-Penjualan", f"{int(overstock['Selisih Stok-Penjualan'].sum()):,}" if len(overstock) else "0")
 
-    if dead_stock.empty:
-        st.success("Tidak ada barang dead stock - semua SKU dengan stok pernah terjual dalam 3 bulan terakhir. 🎉")
+    if overstock.empty:
+        st.success("Tidak ada barang overstock. 🎉")
         return
 
-    tab_list, tab_brand = st.tabs(["📋 Daftar Dead Stock", "📦 Analitik per Brand"])
+    tab_list, tab_brand = st.tabs(["📋 Daftar Overstock", "📦 Analitik per Brand"])
 
     # --------------------------------------------------------
-    # TAB 1: DAFTAR DEAD STOCK (filter + tabel + download)
+    # TAB 1: DAFTAR OVERSTOCK (filter + tabel + download)
     # --------------------------------------------------------
     with tab_list:
-        brand_options = ["Semua"] + sorted(dead_stock[COLS["brand"]].dropna().unique().tolist()) \
-            if COLS["brand"] in dead_stock.columns else ["Semua"]
-        brand_filter = st.selectbox("Filter Brand", brand_options, key="recap_brand_filter")
+        filter_cols = st.columns(2)
+        staff_options = ["Semua"] + sorted(overstock[COLS["sales_staff"]].dropna().unique().tolist())
+        staff_filter = filter_cols[0].selectbox("Filter Sales Staff", staff_options, key="over_staff_filter")
+        brand_options = ["Semua"] + sorted(overstock[COLS["brand"]].dropna().unique().tolist()) \
+            if COLS["brand"] in overstock.columns else ["Semua"]
+        brand_filter = filter_cols[1].selectbox("Filter Brand", brand_options, key="over_brand_filter")
 
-        view = dead_stock
-        if brand_filter != "Semua" and COLS["brand"] in dead_stock.columns:
+        view = overstock
+        if staff_filter != "Semua":
+            view = view[view[COLS["sales_staff"]] == staff_filter]
+        if brand_filter != "Semua" and COLS["brand"] in overstock.columns:
             view = view[view[COLS["brand"]] == brand_filter]
 
-        st.caption(f"Menampilkan {len(view)} SKU - sudah otomatis diurutkan per Brand lalu Nama Barang.")
+        st.caption(f"Menampilkan {len(view)} SKU - sudah otomatis diurutkan per Sales Staff, Brand, lalu Nama Barang.")
 
         display_cols = [c for c in [
-            COLS["product_id"], COLS["nama_barang"], COLS.get("brand"),
-            COLS["stok"], COLS["qty_terjual_3bulan"],
+            COLS["product_id"], COLS["nama_barang"], COLS.get("brand"), COLS["sales_staff"],
+            COLS["stok"], COLS["qty_terjual_3bulan"], "Selisih Stok-Penjualan",
         ] if c in view.columns]
 
-        st.dataframe(view[display_cols], use_container_width=True, height=500)
+        st.dataframe(
+            view[display_cols].sort_values("Selisih Stok-Penjualan", ascending=False)
+            if staff_filter != "Semua" or brand_filter != "Semua" else view[display_cols],
+            use_container_width=True, height=500,
+        )
 
         # ------------------------------------------------
-        # EXCEL EXPORT
+        # EXCEL EXPORT - 1 sheet per Sales Staff
         # ------------------------------------------------
-        def build_recap_excel_bytes(dframe) -> bytes:
+        def build_overstock_excel_bytes(dframe) -> bytes:
             wb = Workbook()
             wb.remove(wb.active)
             header_font = Font(name="Arial", bold=True, color="FFFFFF")
             header_fill = PatternFill("solid", fgColor="186156")
 
             ws = wb.create_sheet("Summary", 0)
-            ws["A1"] = "Sales Recap - Dead Stock 3 Bulan - K. Beauty"
+            ws["A1"] = "Overstock - K. Beauty"
             ws["A1"].font = Font(name="Arial", bold=True, size=14, color="186156")
-            ws["A3"], ws["B3"] = "Total SKU Dead Stock", len(dframe)
-            ws["A4"], ws["B4"] = "Total Qty Stok Menumpuk", int(dframe[COLS["stok"]].sum())
+            ws["A3"], ws["B3"] = "Total SKU Overstock", len(dframe)
+            ws["A4"], ws["B4"] = "Total Selisih Stok-Penjualan", int(dframe["Selisih Stok-Penjualan"].sum())
             for col, width in zip("AB", (32, 20)):
                 ws.column_dimensions[col].width = width
 
             export_cols = [c for c in [
                 COLS["product_id"], COLS["nama_barang"], COLS.get("brand"),
-                COLS["stok"], COLS["qty_terjual_3bulan"],
+                COLS["stok"], COLS["qty_terjual_3bulan"], "Selisih Stok-Penjualan",
             ] if c in dframe.columns]
-            write_sheet(wb, "Dead Stock", dframe[export_cols], header_font, header_fill)
+            write_sheet(wb, "Semua Overstock", dframe[export_cols], header_font, header_fill)
 
-            if COLS["brand"] in dframe.columns:
-                for brand, group in dframe.groupby(COLS["brand"]):
-                    write_sheet(wb, str(brand), group[export_cols], header_font, header_fill)
+            for staff, group in dframe.groupby(COLS["sales_staff"]):
+                write_sheet(wb, str(staff), group[export_cols], header_font, header_fill)
 
             buffer = io.BytesIO()
             wb.save(buffer)
             return buffer.getvalue()
 
         st.divider()
-        excel_bytes = build_recap_excel_bytes(dead_stock)
+        excel_bytes = build_overstock_excel_bytes(overstock)
         st.download_button(
-            "⬇️ Download Excel (Dead Stock + per Brand)",
+            "⬇️ Download Excel (Semua Overstock + per Sales Staff)",
             data=excel_bytes,
-            file_name="Sales_Recap_Dead_Stock.xlsx",
+            file_name="Overstock.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="recap_download",
+            key="over_download",
         )
 
     # --------------------------------------------------------
-    # TAB 2: ANALITIK PER BRAND (Total SKU vs Total Qty per brand)
+    # TAB 2: ANALITIK PER BRAND
     # --------------------------------------------------------
     with tab_brand:
-        st.subheader("📦 Dead Stock per Brand")
+        st.subheader("📦 Overstock per Brand")
 
-        if COLS["brand"] not in dead_stock.columns or dead_stock[COLS["brand"]].dropna().empty:
+        if COLS["brand"] not in overstock.columns or overstock[COLS["brand"]].dropna().empty:
             st.caption("Kolom Brand/Jenis tidak ditemukan di data yang diupload.")
         else:
-            brand_agg = dead_stock.groupby(COLS["brand"]).agg(
+            brand_agg = overstock.groupby(COLS["brand"]).agg(
                 Total_SKU=(COLS["product_id"], "count"),
-                Total_Qty=(COLS["stok"], "sum"),
+                Total_Selisih=("Selisih Stok-Penjualan", "sum"),
             ).reset_index().rename(columns={COLS["brand"]: "Brand"})
-            brand_agg["Rata_rata_Qty_per_SKU"] = (brand_agg["Total_Qty"] / brand_agg["Total_SKU"]).round(1)
-            brand_agg = brand_agg.sort_values("Total_SKU", ascending=False)
+            brand_agg = brand_agg.sort_values("Total_Selisih", ascending=False)
 
-            st.caption(
-                "**Total SKU** = berapa jenis barang mati per brand. **Total Qty** = berapa pcs fisik yang "
-                "menumpuk. Brand dengan SKU banyak tapi rata-rata qty/SKU kecil → banyak varian yang perlu "
-                "dirasionalisasi. Brand dengan qty besar di sedikit SKU → cek barang spesifiknya untuk clearance."
-            )
-
-            sort_by = st.radio(
-                "Urutkan berdasarkan", ["Total SKU", "Total Qty"], horizontal=True, key="recap_sort_by"
-            )
-            sort_col = "Total_SKU" if sort_by == "Total SKU" else "Total_Qty"
-            brand_view = brand_agg.sort_values(sort_col, ascending=False)
-
-            top_n = st.slider("Tampilkan berapa brand teratas", 5, min(40, len(brand_view)),
-                               value=min(15, len(brand_view)), key="recap_top_n")
-            brand_view = brand_view.head(top_n)
+            top_n = st.slider("Tampilkan berapa brand teratas", 5, min(40, len(brand_agg)),
+                               value=min(15, len(brand_agg)), key="over_top_n")
+            brand_view = brand_agg.head(top_n)
 
             chart_cols = st.columns(2)
             with chart_cols[0]:
-                st.markdown("**Total SKU Dead Stock per Brand**")
+                st.markdown("**Total SKU Overstock per Brand**")
                 st.bar_chart(brand_view.set_index("Brand")["Total_SKU"], color=TEAL)
             with chart_cols[1]:
-                st.markdown("**Total Qty Menumpuk per Brand**")
-                st.bar_chart(brand_view.set_index("Brand")["Total_Qty"], color=LIME)
+                st.markdown("**Total Selisih Stok-Penjualan per Brand**")
+                st.bar_chart(brand_view.set_index("Brand")["Total_Selisih"], color=LIME)
 
             st.markdown("**Tabel lengkap per Brand**")
             st.dataframe(
                 brand_agg.rename(columns={
-                    "Total_SKU": "Total SKU Dead Stock",
-                    "Total_Qty": "Total Qty Stok Menumpuk",
-                    "Rata_rata_Qty_per_SKU": "Rata-rata Qty per SKU",
+                    "Total_SKU": "Total SKU Overstock",
+                    "Total_Selisih": "Total Selisih Stok-Penjualan",
                 }),
                 use_container_width=True, height=400,
             )
@@ -610,5 +808,7 @@ if menu == MENU_WELCOME:
     render_welcome()
 elif menu == MENU_PO:
     render_po_recommendation()
-elif menu == MENU_RECAP:
-    render_sales_recap()
+elif menu == MENU_DEADSTOCK:
+    render_deadstock()
+elif menu == MENU_OVERSTOCK:
+    render_overstock()
