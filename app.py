@@ -1,28 +1,3 @@
-"""
-app.py
-======
-Streamlit dashboard for K. Beauty / The Beauty Shop - 3 menus:
-
-1. Welcome        - overview stats once Data Stok is uploaded
-2. PO Recommendation - weekly PO draft from Data Stok + Data Penjualan 30 Hari
-3. Sales Recap    - dead-stock finder from Data Stok + Data Penjualan 3 Bulan
-
-Upload iPOS 5.0 exports as-is - no manual cleanup needed. No n8n, no paid
-service, no external database.
-
-RUN LOCALLY
------------
-    pip install -r requirements.txt
-    streamlit run app.py
-
-DEPLOY FREE (so your team can access it from a browser link)
---------------------------------------------------------------
-    1. Push this folder to a GitHub repo (app.py, po_logic.py,
-       requirements.txt, assets/logo.jpg, .streamlit/config.toml).
-    2. Go to https://share.streamlit.io -> "New app" -> connect the repo.
-    3. Streamlit Community Cloud builds and hosts it for free.
-"""
-
 import io
 import pandas as pd
 import streamlit as st
