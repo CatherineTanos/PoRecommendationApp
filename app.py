@@ -23,13 +23,13 @@ LOGO_PATH = "assets/logo.jpg"
 TEAL = "#186156"
 LIME = "#ADF901"
 
-MENU_WELCOME = "🏠 Welcome"
-MENU_PO = "📊 PO Recommendation"
-MENU_DEADSTOCK = "🧟 Deadstock"
-MENU_OVERSTOCK = "📈 Overstock"
+MENU_WELCOME = "Dashboard"
+MENU_PO = "PO Recommendation"
+MENU_DEADSTOCK = "Deadstock"
+MENU_OVERSTOCK = "Overstock"
 
 st.set_page_config(
-    page_title="K. Beauty - Dashboard",
+    page_title="Dashboard",
     page_icon=LOGO_PATH,
     layout="wide",
 )
@@ -76,7 +76,7 @@ st.markdown(
 # ============================================================
 
 st.sidebar.image(LOGO_PATH, use_container_width=True)
-st.sidebar.title("📦 K. Beauty Dashboard")
+st.sidebar.title("Dashboard")
 
 menu = st.sidebar.radio(
     "Menu", [MENU_WELCOME, MENU_PO, MENU_DEADSTOCK, MENU_OVERSTOCK], label_visibility="collapsed"
@@ -241,7 +241,7 @@ Pembelian per Item per Jenis* untuk pembelian) - tidak perlu dirapikan dulu.
 # ============================================================
 
 def render_po_recommendation():
-    st.header("📊 PO Recommendation")
+    st.header("PO Recommendation")
 
     if stok_error:
         st.error(f"Gagal membaca Data Stok: {stok_error}")
@@ -269,7 +269,7 @@ def render_po_recommendation():
     df, dup_report = build_dataset(penjualan_30h_df, stok_df)
     df = compute_recommendations(df)
 
-    tab_current, tab_brand = st.tabs(["📊 Minggu Ini", "📦 Analitik per Brand"])
+    tab_current, tab_brand = st.tabs(["Minggu Ini", "Analitik per Brand"])
 
     # --------------------------------------------------------
     # TAB 1: MINGGU INI
@@ -293,9 +293,9 @@ def render_po_recommendation():
         counts = df["Flag"].value_counts()
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total SKU", len(df))
-        col2.metric("🔴 Urgent", int(counts.get("🔴 URGENT", 0)))
-        col3.metric("🟡 Check Sales", int(counts.get("🟡 CHECK SALES", 0)))
-        col4.metric("🟢 Normal", int(counts.get("🟢 NORMAL", 0)))
+        col2.metric("Urgent", int(counts.get("URGENT", 0)))
+        col3.metric("Check Sales", int(counts.get("CHECK SALES", 0)))
+        col4.metric("Normal", int(counts.get("NORMAL", 0)))
 
         if df["PO_Value_Rp"].sum() > 0:
             st.metric("Estimasi Nilai PO (harga pokok)", f"Rp {df['PO_Value_Rp'].sum():,.0f}")
@@ -334,7 +334,7 @@ def render_po_recommendation():
             height=450,
         )
 
-        urgent_items = df[df["Flag"] == "🔴 URGENT"]
+        urgent_items = df[df["Flag"] == "URGENT"]
         if len(urgent_items) > 0:
             with st.expander(f"⚠️ {len(urgent_items)} item butuh perhatian segera"):
                 st.dataframe(urgent_items[display_cols], use_container_width=True)
@@ -352,9 +352,9 @@ def render_po_recommendation():
             ws["A1"] = "PO Recommendation Summary - K. Beauty"
             ws["A1"].font = Font(name="Arial", bold=True, size=14, color="186156")
             ws["A3"], ws["B3"] = "Total SKU", len(dframe)
-            ws["A4"], ws["B4"] = "🔴 Urgent", int((dframe["Flag"] == "🔴 URGENT").sum())
-            ws["A5"], ws["B5"] = "🟡 Check Sales", int((dframe["Flag"] == "🟡 CHECK SALES").sum())
-            ws["A6"], ws["B6"] = "🟢 Normal", int((dframe["Flag"] == "🟢 NORMAL").sum())
+            ws["A4"], ws["B4"] = "Urgent", int((dframe["Flag"] == "URGENT").sum())
+            ws["A5"], ws["B5"] = "Check Sales", int((dframe["Flag"] == "CHECK SALES").sum())
+            ws["A6"], ws["B6"] = "Normal", int((dframe["Flag"] == "NORMAL").sum())
             for col, width in zip("AB", (32, 20)):
                 ws.column_dimensions[col].width = width
 
@@ -432,7 +432,7 @@ def render_po_recommendation():
 # ============================================================
 
 def render_deadstock():
-    st.header("🧟 Deadstock")
+    st.header("Deadstock")
     st.caption(
         "Barang dengan stok masih ada TAPI tidak ada penjualan sama sekali "
         "dalam 3 bulan terakhir - kandidat produk fokus / clearance. Produk "
@@ -495,7 +495,7 @@ def render_deadstock():
         st.success("Tidak ada barang deadstock - semua SKU dengan stok pernah terjual dalam 3 bulan terakhir. 🎉")
         return
 
-    tab_list, tab_brand = st.tabs(["📋 Daftar Deadstock", "📦 Analitik per Brand"])
+    tab_list, tab_brand = st.tabs(["Daftar Deadstock", "Analitik per Brand"])
 
     # --------------------------------------------------------
     # TAB 1: DAFTAR DEADSTOCK (filter + tabel + download)
@@ -619,7 +619,7 @@ def render_deadstock():
 # ============================================================
 
 def render_overstock():
-    st.header("📈 Overstock")
+    st.header("Overstock")
     st.caption(
         "Barang dengan stok LEBIH BANYAK dari penjualan 3 bulan terakhir - "
         "termasuk yang sempat laku sedikit tapi masih kelebihan stok jauh. "
@@ -663,10 +663,10 @@ def render_overstock():
     col2.metric("Total Selisih Stok-Penjualan", f"{int(overstock['Selisih Stok-Penjualan'].sum()):,}" if len(overstock) else "0")
 
     if overstock.empty:
-        st.success("Tidak ada barang overstock. 🎉")
+        st.success("Tidak ada barang overstock")
         return
 
-    tab_list, tab_brand = st.tabs(["📋 Daftar Overstock", "📦 Analitik per Brand"])
+    tab_list, tab_brand = st.tabs(["Daftar Overstock", "Analitik per Brand"])
 
     # --------------------------------------------------------
     # TAB 1: DAFTAR OVERSTOCK (filter + tabel + download)
@@ -742,7 +742,7 @@ def render_overstock():
     # TAB 2: ANALITIK PER BRAND
     # --------------------------------------------------------
     with tab_brand:
-        st.subheader("📦 Overstock per Brand")
+        st.subheader("Overstock per Brand")
 
         if COLS["brand"] not in overstock.columns or overstock[COLS["brand"]].dropna().empty:
             st.caption("Kolom Brand/Jenis tidak ditemukan di data yang diupload.")
