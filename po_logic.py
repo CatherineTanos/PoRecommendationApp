@@ -36,9 +36,9 @@ COLS = {
 }
 
 FLAG_COLORS = {
-    "🔴 URGENT": "FFC7CE",
-    "🟡 CHECK SALES": "FFEB9C",
-    "🟢 NORMAL": "C6EFCE",
+    "URGENT": "FFC7CE",
+    "CHECK SALES": "FFEB9C",
+    "NORMAL": "C6EFCE",
 }
 
 # Days-of-stock-left below which an item still gets flagged urgent even
@@ -383,27 +383,27 @@ def classify_row(row):
                 f"Stok ({int(stok)}) sama persis dengan penjualan 30 hari terakhir "
                 f"({int(terjual)} pcs) - indikasi slow moving, cek dulu sebelum PO"
             )
-        return 0, "🟡 CHECK SALES", alasan
+        return 0, "CHECK SALES", alasan
 
     po_raw = terjual - stok
 
     # Rule: stock already covers 30-day demand -> no PO needed.
     if po_raw <= 0:
-        return 0, "🟢 NORMAL", "Stok masih cukup untuk kebutuhan 30 hari ke depan"
+        return 0, "NORMAL", "Stok masih cukup untuk kebutuhan 30 hari ke depan"
 
     po_qty = po_raw
 
     # Rule: stock at/below zero while item still sells -> urgent.
     if stok <= 0:
-        return po_qty, "🔴 URGENT", "Stok habis, barang ini masih terjual dalam 30 hari terakhir"
+        return po_qty, "URGENT", "Stok habis, barang ini masih terjual dalam 30 hari terakhir"
 
     # Rule: stock will run out very soon at current sales pace -> urgent.
     daily_rate = terjual / 30
     days_left = stok / daily_rate if daily_rate else 999
     if days_left < URGENT_DAYS_LEFT:
-        return po_qty, "🔴 URGENT", f"Stok tersisa hanya cukup untuk ~{days_left:.0f} hari"
+        return po_qty, "URGENT", f"Stok tersisa hanya cukup untuk ~{days_left:.0f} hari"
 
-    return po_qty, "🟢 NORMAL", "PO rutin berdasarkan pola penjualan 30 hari"
+    return po_qty, "NORMAL", "PO rutin berdasarkan pola penjualan 30 hari"
 
 
 def compute_recommendations(df: pd.DataFrame) -> pd.DataFrame:
