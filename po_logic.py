@@ -417,31 +417,18 @@ def compute_recommendations(df: pd.DataFrame) -> pd.DataFrame:
 # ============================================================
 # SALES STAFF <-> BRAND MAPPING
 # ============================================================
-# Built from the sales-staff/brand assignment list you shared. A few brand
-# names there are spelled out in full (e.g. "Indo", "Laneige", "Madagascar")
-# while the actual "Jenis" code in your iPOS exports is a short abbreviation
-# (e.g. "IND", "LAN", "MADA"). Where the short code wasn't an obvious 1:1
-# match, this is my best-guess correlation based on the codes actually seen
-# in your exports so far - PLEASE double check the ones marked (guess) and
-# tell me if any need correcting:
 #   DGM  = Daeng (Gi Meo Ri)   (guess)   HL   = Hadalabo (Hada Labo) (guess)
 #   HB   = Hellobubble          (guess)   GNG  = Grace and Glow       (guess)
 #   SW   = Sulwhasoo             (guess)   PF   = Pinkflash            (guess)
 #   BIO  = Bioaqua                (guess)   FOCA = Focallure             (guess)
 #   SOME = Some by mi              (guess)
-#
-# Codes seen in your data that aren't in the list at all yet (BMS, DIANE,
-# GIFT, SHRD) fall into "Belum Terpetakan" below until you tell me who owns
-# them. The "Tbs.." side of your list (Ocha/Vina/Chey/Putry/Megen) is kept
-# here too in case that store's data ever gets processed by this app, but
-# none of those brand names have shown up in your K.Beauty exports so far.
+
 STAFF_BRAND_MAP = {
-    "Sasi": ["BEAUDELAB", "BLACKMORES", "DGM", "FLAIRE", "IMPLORA", "IND", "LCC", "MADA", "PUREUM"],
-    "Frezia": ["AB", "FLIMTY", "HL", "JUDY", "KR", "LAN", "MU", "PF", "SENKA"],
-    "Chelsy": ["ASIA", "BIO", "BNP", "BREYLEE", "FAV", "FOCA", "GNG", "LABORE", "MLEN", "SC", "SOME", "SW", "TO", "WEST"],
-    "Tidak Bertuan": ["AMH", "CBD", "COSRX", "HB", "SKII", "THAI", "X2"],
-    # Tbs-side staff - not currently relevant to K.Beauty POS data, kept for
-    # completeness. None of these conflict with the K.Beauty codes above.
+    "Sasi": ["BEAUDELAB", "BLACKMORES", "DGM", "FLAIRE", "IMPLORA", "IND", "LCC", "MADA", "PUREUM", "BMS"],
+    "Frezia": ["AB", "FLIMTY", "HL", "JUDY", "KR", "LAN", "MU", "PF", "SENKA", "DIANE"],
+    "Chelsy": ["ASIA", "BIO", "BNP", "BREYLEE", "FAV", "FOCA", "GNG", "LABORE", "MLEN", "SC", "SOME", "SW", "TO", "WEST", "SHRD"],
+    "Tidak Bertuan": ["AMH", "CBD", "COSRX", "HB", "SKII", "THAI", "X2", "MILBON", "GIFT", "INS"],
+    # Tbs-side staff 
     "Ocha": ["AERIS", "AVOSKIN", "AZARINE", "CRAYOLAN", "DIOR", "ESTEE", "KK", "LACOCO", "LA GIRL",
              "L'OREAL", "MAYBELLINE", "ORIGINOTE", "SCARLETT"],
     "Vina": ["AP", "BB", "BELLE", "CHANEL", "HA", "HERBORIS", "LUMECOLORS", "LT PRO", "MATRIX",
