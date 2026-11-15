@@ -16,6 +16,7 @@ RULES (per your latest instructions)
 """
 
 import re
+import unicodedata
 import pandas as pd
 
 # ============================================================
@@ -424,28 +425,45 @@ def compute_recommendations(df: pd.DataFrame) -> pd.DataFrame:
 #   SOME = Some by mi              (guess)
 
 STAFF_BRAND_MAP = {
-    "Sasi": ["BEAUDELAB", "BLACKMORES", "DGM", "FLAIRE", "IMPLORA", "IND", "LCC", "MADA", "PUREUM", "BMS"],
-    "Frezia": ["AB", "FLIMTY", "HL", "JUDY", "KR", "LAN", "MU", "PF", "SENKA", "DIANE"],
-    "Chelsy": ["ASIA", "BIO", "BNP", "BREYLEE", "FAV", "FOCA", "GNG", "LABORE", "MLEN", "SC", "SOME", "SW", "TO", "WEST", "SHRD"],
-    "Tidak Bertuan": ["AMH", "CBD", "COSRX", "HB", "SKII", "THAI", "X2", "MILBON", "GIFT", "INS"],
-    # Tbs-side staff 
-    "Ocha": ["AERIS", "AVOSKIN", "AZARINE", "CRAYOLAN", "DIOR", "ESTEE", "KK", "LACOCO", "LA GIRL",
-             "L'OREAL", "MAYBELLINE", "ORIGINOTE", "SCARLETT"],
-    "Vina": ["AP", "BB", "BELLE", "CHANEL", "HA", "HERBORIS", "LUMECOLORS", "LT PRO", "MATRIX",
-             "MAKARIZO", "MAKE OVER"],
+    "Sasi": ["BEAUDELAB", "BLACKMORES", "DGM", "FLAIRE", "IMPLORA", "MADA", "PUREUM", "BMS"],
+    "Frezia": ["AB", "FLIMTY", "HL", "JUDY", "KR", "LAN", "PF", "SENKA", "DIANE"],
+    "Chelsy": ["ASIA", "BIO", "BNP", "BREYLEE", "FAV", "FOCA", "GNG", "LABORE", "MLEN", "SOME", "SW", "TO", "SHRD"],
+    "Tidak Bertuan": ["AMH", "CBD", "COSRX", "HB", "SKII", "THAI", "X2", "MILBON", "GIFT", "INS",
+                      "WEST", "MU"],
+    # Tbs-side staff
+    # Kode singkat di kolom "Jenis" iPOS (AVO, CR, DR, LG, ...) ditulis juga di
+    # sini supaya tidak jatuh ke "Tidak Bertuan".
+    "Ocha": ["AERIS", "AVOSKIN", "AVO", "AZARINE", "CRAYOLAN", "CR", "DIOR", "DR", "ESTEE", "ESTEE LAUDER",
+             "KK", "LACOCO", "LA GIRL", "LG", "L'OREAL", "MAYBELLINE", "MUFE", "ORIGINOTE",
+             "SCARLETT", "SC", "SIGMA"],
+    "Vina": ["AP", "BB", "BELLE", "CHANEL", "HA", "HERBORIS", "LUMECOLORS", "LMC", "LT PRO", "LCC",
+             "MATRIX", "MAKARIZO", "MAKE OVER", "MO"],
     "Chey": ["BNB", "DAZZLE", "LAVOJOY", "YOU"],
-    "Putry": ["BENEFIT", "HARA", "INAURA", "LUXCRIME", "MAC", "NVMEE", "SA", "TH", "TKD", "TLM", "YSL"],
+    "Putry": ["BENEFIT", "BNF", "BS", "HARA", "INAURA", "IND", "INDO", "LUXCRIME", "MAC", "NVMEE", "OPI", "RT",
+              "SA", "TH", "TKD", "TLM", "YSL"],
     "Megen": ["SOMETHINC"],
 }
 
 UNMAPPED_STAFF_LABEL = "Tidak Bertuan"
 
 
+def _norm_brand(x):
+    """Kunci pencocokan brand yang toleran: huruf kecil, tanpa aksen, tanpa
+    spasi/titik/tanda kutip. Jadi "Lt.Pro" == "LT PRO", "L’Oréal" == "L'OREAL",
+    "Estée" == "ESTEE", "Make Over" == "MAKEOVER"."""
+    if not isinstance(x, str):
+        return None
+    x = unicodedata.normalize("NFKD", x)
+    x = "".join(ch for ch in x if not unicodedata.combining(ch))
+    x = re.sub(r"[^a-z0-9]", "", x.lower())
+    return x or None
+
+
 def _build_brand_to_staff():
     mapping = {}
     for staff, brands in STAFF_BRAND_MAP.items():
         for b in brands:
-            key = _norm_header(b)
+            key = _norm_brand(b)
             if key and key not in mapping:  # first occurrence wins
                 mapping[key] = staff
     return mapping
@@ -457,7 +475,7 @@ BRAND_TO_STAFF = _build_brand_to_staff()
 def get_staff_for_brand(brand) -> str:
     if brand is None or (isinstance(brand, float) and pd.isna(brand)):
         return UNMAPPED_STAFF_LABEL
-    return BRAND_TO_STAFF.get(_norm_header(str(brand)), UNMAPPED_STAFF_LABEL)
+    return BRAND_TO_STAFF.get(_norm_brand(str(brand)), UNMAPPED_STAFF_LABEL)
 
 
 def add_sales_staff_column(df: pd.DataFrame) -> pd.DataFrame:
